@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>hobo-mobile</title>
+  <style>
+    :root {
+      --bg1: #17121c;
+      --bg2: #2b1f35;
+      --panel: rgba(20,20,28,0.82);
+      --line: rgba(255,255,255,0.12);
+      --text: #f7f2ff;
+      --muted: #c6b8d8;
+      --accent: #a86fdf;
+      --accent2: #ff9a3c;
+      --good: #69c36d;
+      --bad: #ff5d73;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: radial-gradient(circle at top, #3d2950 0%, var(--bg1) 55%, #0d0a11 100%); color: var(--text); font-family: Arial, sans-serif; overflow: hidden; }
+    #gameWrap { position: relative; width: 100vw; height: 100dvh; overflow: hidden; }
+    canvas { display: block; width: 100%; height: 100%; }
+    .hud {
+      position: absolute; inset: 0 auto auto 0; width: 100%; padding: 12px; display: flex; justify-content: space-between; gap: 12px; pointer-events: none;
+    }
+    .box {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; backdrop-filter: blur(10px);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.24);
+    }
+    .title { font-size: 14px; color: var(--muted); margin-bottom: 6px; }
+    .bar { width: 140px; height: 10px; background: rgba(255,255,255,0.12); border-radius: 999px; overflow: hidden; }
+    .fill { height: 100%; }
+    .playerHp { background: linear-gradient(90deg, var(--good), #b5ff8d); }
+    .enemyHp { background: linear-gradient(90deg, var(--bad), #ff9a8d); }
+    .centerMsg {
+      position: absolute; left: 50%; top: 18%; transform: translateX(-50%);
+      background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 10px 16px; font-size: 14px; color: var(--muted);
+      backdrop-filter: blur(8px); pointer-events: none;
+    }
+    .controls {
+      position: absolute; left: 0; right: 0; bottom: max(12px, env(safe-area-inset-bottom));
+      display: flex; justify-content: space-between; align-items: end; padding: 14px; gap: 14px;
+    }
+    .pad, .actions { display: flex; gap: 10px; align-items: center; }
+    .pad { flex-wrap: wrap; max-width: 45vw; }
+    .actions { max-width: 45vw; }
+    button.ctrl {
+      border: 1px solid rgba(255,255,255,0.14); color: var(--text);
+      background: linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.08));
+      backdrop-filter: blur(10px);
+      box-shadow: 0 10px 24px rgba(0,0,0,0.26);
+      min-width: 64px; min-height: 64px; border-radius: 20px; font-size: 24px; font-weight: 700;
+      touch-action: manipulation; user-select: none;
+    }
+    button.ctrl:active, button.ctrl.active { transform: scale(0.96); background: rgba(168,111,223,0.35); }
+    .wide { min-width: 82px; }
+    .jump { background: linear-gradient(180deg, rgba(255,154,60,0.28), rgba(255,255,255,0.08)); }
+    .attack { background: linear-gradient(180deg, rgba(168,111,223,0.34), rgba(255,255,255,0.08)); }
+    .pauseBtn {
+      position: absolute; top: 86px; right: 12px; width: 48px; height: 48px; border-radius: 14px; font-size: 18px;
+      background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    }
+    .hint {
+      position: absolute; left: 12px; bottom: 146px; background: var(--panel); border: 1px solid var(--line); color: var(--muted);
+      padding: 10px 12px; border-radius: 12px; font-size: 13px; max-width: 220px;
+    }
+    @media (min-width: 900px) {
+      .hint { bottom: 16px; }
+      .controls { max-width: 1000px; margin: 0 auto; }
+    }
+  </style>
+</head>
+<body>
+  <div id="gameWrap">
+    <canvas id="game" width="1280" height="720"></canvas>
+
+    <div class="hud">
+      <div class="box">
+        <div class="title">Игрок</div>
+        <div class="bar"><div id="playerFill" class="fill playerHp" style="width:100%"></div></div>
+      </div>
+      <div class="box">
+        <div class="title">Враг</div>
+        <div class="bar"><div id="enemyFill" class="fill enemyHp" style="width:100%"></div></div>
+      </div>
+    </div>
+
+    <div id="msg" class="centerMsg">Hobo Mobile — кнопки для телефона уже работают</div>
+    <button id="pause" class="pauseBtn">II</button>
+    <div class="hint">← → ходить, A бить, J прыгать. На телефоне держи стрелки пальцем.</div>
+
+    <div class="controls">
+      <div class="pad">
+        <button class="ctrl wide" data-action="left">←</button>
+        <button class="ctrl wide" data-action="right">→</button>
+      </div>
+      <div class="actions">
+        <button class="ctrl attack" data-action="attack">A</button>
+        <button class="ctrl jump" data-action="jump">J</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const playerFill = document.getElementById('playerFill');
+    const enemyFill = document.getElementById('enemyFill');
+    const msg = document.getElementById('msg');
+    const pauseBtn = document.getElementById('pause');
+
+    const state = {
+      left: false,
+      right: false,
+      attack: false,
+      paused: false,
+      keys: {}
+    };
+
+    const gravity = 0.75;
+    const groundY = 590;
+
+    const player = {
+      x: 220, y: groundY, w: 72, h: 118,
+      vx: 0, vy: 0, speed: 5.2, facing: 1,
+      hp: 100, attackCooldown: 0, color: '#d7c9e8', onGround: true
+    };
+
+    const enemy = {
+      x: 860, y: groundY, w: 72, h: 118,
+      vx: 0, vy: 0, speed: 2.1, facing: -1,
+      hp: 100, attackCooldown: 0, color: '#ff9d87', onGround: true,
+      hitFlash: 0
+    };
+
+    function pressAction(action, pressed) {
+      if (action === 'left') state.left = pressed;
+      if (action === 'right') state.right = pressed;
+      if (action === 'attack') state.attack = pressed;
+      if (action === 'jump' && pressed) jump(player);
+    }
+
+    function jump(obj) {
+      if (obj.onGround) {
+        obj.vy = -14;
+        obj.onGround = false;
+      }
+    }
+
+    function attack(attacker, target) {
+      if (attacker.attackCooldown > 0) return;
+      attacker.attackCooldown = 28;
+      const range = 86;
+      const dx = target.x - attacker.x;
+      const near = Math.abs(dx) < range;
+      const facingOk = Math.sign(dx || 1) === attacker.facing;
+      if (near && facingOk) {
+        target.hp = Math.max(0, target.hp - 12);
+        target.hitFlash = 8;
+        target.vx += attacker.facing * 4.5;
+        if (target === enemy && target.hp <= 0) msg.textContent = 'Ты победил';
+        if (target === player && target.hp <= 0) msg.textContent = 'Тебя победили';
+      }
+    }
+
+    function update() {
+      if (state.paused) return;
+
+      player.vx = 0;
+      if (state.left) { player.vx = -player.speed; player.facing = -1; }
+      if (state.right) { player.vx = player.speed; player.facing = 1; }
+      if (state.attack) attack(player, enemy);
+
+      const dx = player.x - enemy.x;
+      enemy.facing = dx > 0 ? 1 : -1;
+      if (Math.abs(dx) > 72 && enemy.hp > 0) enemy.vx = enemy.facing * enemy.speed;
+      else enemy.vx = 0;
+      if (Math.abs(dx) < 82 && enemy.hp > 0) attack(enemy, player);
+
+      for (const obj of [player, enemy]) {
+        obj.attackCooldown = Math.max(0, obj.attackCooldown - 1);
+        obj.hitFlash = Math.max(0, (obj.hitFlash || 0) - 1);
+        obj.vy += gravity;
+        obj.x += obj.vx;
+        obj.y += obj.vy;
+        if (obj.y >= groundY) {
+          obj.y = groundY;
+          obj.vy = 0;
+          obj.onGround = true;
+        }
+        obj.x = Math.max(40, Math.min(canvas.width - 40 - obj.w, obj.x));
+      }
+
+      playerFill.style.width = player.hp + '%';
+      enemyFill.style.width = enemy.hp + '%';
+    }
+
+    function drawBackground() {
+      const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      g.addColorStop(0, '#442b58');
+      g.addColorStop(0.55, '#23152f');
+      g.addColorStop(1, '#110d17');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = '#1b1523';
+      ctx.fillRect(0, 610, canvas.width, 110);
+
+      ctx.fillStyle = 'rgba(255,255,255,0.04)';
+      for (let i = 0; i < 8; i++) {
+        ctx.fillRect(i * 180 + 40, 500 - (i % 2) * 30, 90, 110);
+      }
+    }
+
+    function drawFighter(obj, isPlayer) {
+      ctx.save();
+      ctx.translate(obj.x + obj.w / 2, obj.y - obj.h);
+      ctx.scale(obj.facing, 1);
+
+      ctx.fillStyle = obj.hitFlash ? '#ffffff' : obj.color;
+      ctx.fillRect(-20, 28, 40, 56);
+      ctx.fillRect(-16, 84, 12, 28);
+      ctx.fillRect(4, 84, 12, 28);
+      ctx.fillRect(-32, 34, 12, 42);
+      ctx.fillRect(20, 34, 12, 42);
+
+      ctx.beginPath();
+      ctx.arc(0, 12, 20, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#1c1722';
+      ctx.fillRect(-10, 8, 4, 4);
+      ctx.fillRect(6, 8, 4, 4);
+
+      if ((isPlayer && state.attack && obj.attackCooldown > 20) || (!isPlayer && obj.attackCooldown > 20)) {
+        ctx.fillStyle = isPlayer ? '#c58cff' : '#ff7c67';
+        ctx.fillRect(26, 42, 28, 10);
+      }
+      ctx.restore();
+    }
+
+    function draw() {
+      drawBackground();
+      drawFighter(player, true);
+      drawFighter(enemy, false);
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.font = '24px Arial';
+      ctx.fillText('Prototype', 24, 42);
+    }
+
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    document.querySelectorAll('[data-action]').forEach(btn => {
+      const action = btn.dataset.action;
+      const onDown = e => { e.preventDefault(); btn.classList.add('active'); pressAction(action, true); };
+      const onUp = e => { e.preventDefault(); btn.classList.remove('active'); pressAction(action, false); };
+      btn.addEventListener('pointerdown', onDown);
+      btn.addEventListener('pointerup', onUp);
+      btn.addEventListener('pointercancel', onUp);
+      btn.addEventListener('pointerleave', onUp);
+    });
+
+    window.addEventListener('keydown', e => {
+      if (e.key === 'ArrowLeft') { state.left = true; player.facing = -1; }
+      if (e.key === 'ArrowRight') { state.right = true; player.facing = 1; }
+      if (e.key.toLowerCase() === 'a') state.attack = true;
+      if (e.key.toLowerCase() === 'j') jump(player);
+      if (e.key.toLowerCase() === 'p') state.paused = !state.paused;
+    });
+
+    window.addEventListener('keyup', e => {
+      if (e.key === 'ArrowLeft') state.left = false;
+      if (e.key === 'ArrowRight') state.right = false;
+      if (e.key.toLowerCase() === 'a') state.attack = false;
+    });
+
+    pauseBtn.addEventListener('click', () => {
+      state.paused = !state.paused;
+      msg.textContent = state.paused ? 'Пауза' : 'Hobo Mobile — кнопки для телефона уже работают';
+    });
+
+    loop();
+  </script>
+</body>
+</html>
